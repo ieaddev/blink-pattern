@@ -267,8 +267,11 @@
         const patterns = {
             rgbSweep: {
                 name: 'RGB Color Sweep',
-                // Ignores PRNG, goes around color circle with constant intensity, ignoring white LED
+                // Goes around color circle with constant intensity, ignoring white LED
                 execute: function(timerFrame, prng, speed) {
+                    // Advance PRNG to keep state moving
+                    prng.next();
+                    
                     // Hue cycles from 0 to 360 degrees over time
                     const hue = (timerFrame * speed * 0.5) % 360;
                     const saturation = 100;
@@ -425,8 +428,6 @@
             // Timer callback
             function onTimer(frame) {
                 speed = parseFloat(speedSelect.value);
-                // Always advance PRNG to ensure state changes every frame
-                prng.next();
                 const result = patterns[currentPattern].execute(frame, prng, speed);
                 updateUI(result, frame, prng.state);
             }
