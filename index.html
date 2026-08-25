@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blink Pattern Explorer</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+        
+        h1 {
+            color: #e94560;
+            margin-bottom: 30px;
+        }
+        
+        .controls {
+            background: #16213e;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        label {
+            font-size: 14px;
+            color: #a0a0b0;
+        }
+        
+        select, button {
+            padding: 8px 12px;
+            border: none;
+            border-radius: 5px;
+            background: #0f3460;
+            color: #fff;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        
+        select:focus, button:focus {
+            outline: none;
+            box-shadow: 0 0 5px #e94560;
+        }
+        
+        button {
+            background: #e94560;
+            transition: background 0.2s;
+        }
+        
+        button:hover {
+            background: #c81e45;
+        }
+        
+        .visualizer {
+            display: flex;
+            gap: 40px;
+            margin-bottom: 30px;
+        }
+        
+        .circle-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .circle {
+            width: 200px;
+            height: 200px;
+            border-radius: 50%;
+            border: 2px solid #0f3460;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-weight: bold;
+            font-size: 16px;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+        }
+        
+        .color-circle {
+            background: linear-gradient(to right, #ff0000, #ff00ff, #0000ff, #00ffff, #00ff00, #ffff00, #ff0000);
+        }
+        
+        .intensity-circle {
+            background: radial-gradient(circle, #ffffff 0%, #000000 100%);
+        }
+        
+        .circle-inner {
+            width: 160px;
+            height: 160px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .info {
+            background: #16213e;
+            padding: 15px;
+            border-radius: 10px;
+            font-family: monospace;
+            font-size: 12px;
+            max-width: 600px;
+        }
+        
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 5px 0;
+        }
+        
+        .info-label {
+            color: #a0a0b0;
+        }
+        
+        .info-value {
+            color: #4ff08c;
+        }
+    </style>
+</head>
+<body>
+    <h1>Blink Pattern Explorer</h1>
+    
+    <div class="controls">
+        <div class="control-group">
+            <label for="pattern">Blink Pattern:</label>
+            <select id="pattern">
+                <option value="rgbSweep">RGB Color Sweep</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label for="speed">Speed:</label>
+            <select id="speed">
+                <option value="1">1x</option>
+                <option value="2">2x</option>
+                <option value="4">4x</option>
+                <option value="0.5">0.5x</option>
+                <option value="0.25">0.25x</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label>&nbsp;</label>
+            <button id="reset">Reset PRNG</button>
+        </div>
+    </div>
+    
+    <div class="visualizer">
+        <div class="circle-container">
+            <span>Color</span>
+            <div class="circle color-circle">
+                <div class="circle-inner" id="colorDisplay"></div>
+            </div>
+        </div>
+        <div class="circle-container">
+            <span>Intensity</span>
+            <div class="circle intensity-circle">
+                <div class="circle-inner" id="intensityDisplay"></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="info">
+        <div class="info-row">
+            <span class="info-label">Pattern:</span>
+            <span class="info-value" id="infoPattern">RGB Color Sweep</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Timer (60Hz):</span>
+            <span class="info-value" id="infoTimer">0</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">PRNG State:</span>
+            <span class="info-value" id="infoPrng">0</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">RGB:</span>
+            <span class="info-value" id="infoRgb">(0, 0, 0)</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Intensity:</span>
+            <span class="info-value" id="infoIntensity">0%</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">HSV:</span>
+            <span class="info-value" id="infoHsv">(0°, 0%, 0%)</span>
+        </div>
+    </div>
+
+    <script>
+        // LCG PRNG implementation
+        class LCG {
+            constructor(seed = 42) {
+                this.state = seed;
+                // Using parameters from MMIX by Donald Knuth
+                this.a = 6364136223846793005;
+                this.c = 1442695040888963407;
+                this.m = Math.pow(2, 64);
+            }
+            
+            next() {
+                this.state = (this.a * this.state + this.c) % this.m;
+                return this.state / this.m; // Normalized to [0, 1)
+            }
+            
+            nextInt(max) {
+                return Math.floor(this.next() * max);
+            }
+            
+            reset(seed = 42) {
+                this.state = seed;
+            }
+        }
+        
+        // Timer at 60Hz
+        class Timer {
+            constructor(fps = 60) {
+                this.fps = fps;
+                this.interval = 1000 / fps;
+                this.frame = 0;
+                this.lastTime = 0;
+                this.callback = null;
+            }
+            
+            start(callback) {
+                this.callback = callback;
+                this.frame = 0;
+                this.lastTime = performance.now();
+                this.run();
+            }
+            
+            run() {
+                const now = performance.now();
+                const elapsed = now - this.lastTime;
+                
+                if (elapsed >= this.interval) {
+                    this.callback(this.frame);
+                    this.frame++;
+                    this.lastTime = now - (elapsed % this.interval);
+                }
+                
+                requestAnimationFrame(() => this.run());
+            }
+        }
+        
+        // Blink patterns
+        const patterns = {
+            rgbSweep: {
+                name: 'RGB Color Sweep',
+                // Ignores PRNG, goes around color circle with constant intensity, ignoring white LED
+                execute: function(timerFrame, prng, speed) {
+                    // Hue cycles from 0 to 360 degrees over time
+                    const hue = (timerFrame * speed * 0.5) % 360;
+                    const saturation = 100;
+                    const value = 100;
+                    
+                    // Convert HSV to RGB
+                    const rgb = hsvToRgb(hue / 360, saturation / 100, value / 100);
+                    
+                    return {
+                        r: rgb.r,
+                        g: rgb.g,
+                        b: rgb.b,
+                        w: 0, // White LED is ignored
+                        intensity: value / 100
+                    };
+                }
+            }
+        };
+        
+        // HSV to RGB conversion
+        function hsvToRgb(h, s, v) {
+            let r, g, b;
+            
+            if (s === 0) {
+                r = g = b = v;
+            } else {
+                const i = Math.floor(h * 6);
+                const f = h * 6 - i;
+                const p = v * (1 - s);
+                const q = v * (1 - f * s);
+                const t = v * (1 - (1 - f) * s);
+                
+                switch (i % 6) {
+                    case 0: r = v; g = t; b = p; break;
+                    case 1: r = q; g = v; b = p; break;
+                    case 2: r = p; g = v; b = t; break;
+                    case 3: r = p; g = q; b = v; break;
+                    case 4: r = t; g = p; b = v; break;
+                    case 5: r = v; g = p; b = q; break;
+                }
+            }
+            
+            return {
+                r: Math.round(r * 255),
+                g: Math.round(g * 255),
+                b: Math.round(b * 255)
+            };
+        }
+        
+        // RGB to HSV conversion for display
+        function rgbToHsv(r, g, b) {
+            r = r / 255;
+            g = g / 255;
+            b = b / 255;
+            
+            const max = Math.max(r, g, b);
+            const min = Math.min(r, g, b);
+            const delta = max - min;
+            
+            let h = 0;
+            if (delta > 0) {
+                if (max === r) {
+                    h = 60 * (((g - b) / delta) % 6);
+                } else if (max === g) {
+                    h = 60 * (((b - r) / delta) + 2);
+                } else {
+                    h = 60 * (((r - g) / delta) + 4);
+                }
+            }
+            
+            if (h < 0) h += 360;
+            
+            const s = max === 0 ? 0 : delta / max;
+            const v = max;
+            
+            return {
+                h: Math.round(h),
+                s: Math.round(s * 100),
+                v: Math.round(v * 100)
+            };
+        }
+        
+        // Main application
+        function main() {
+            // Elements
+            const patternSelect = document.getElementById('pattern');
+            const speedSelect = document.getElementById('speed');
+            const resetBtn = document.getElementById('reset');
+            const colorDisplay = document.getElementById('colorDisplay');
+            const intensityDisplay = document.getElementById('intensityDisplay');
+            
+            // Info elements
+            const infoPattern = document.getElementById('infoPattern');
+            const infoTimer = document.getElementById('infoTimer');
+            const infoPrng = document.getElementById('infoPrng');
+            const infoRgb = document.getElementById('infoRgb');
+            const infoIntensity = document.getElementById('infoIntensity');
+            const infoHsv = document.getElementById('infoHsv');
+            
+            // Initialize PRNG and Timer
+            const prng = new LCG();
+            const timer = new Timer(60);
+            let currentPattern = 'rgbSweep';
+            let speed = 1;
+            
+            // Update UI with current state
+            function updateUI(result, frame, prngState) {
+                // Update color display
+                colorDisplay.style.backgroundColor = `rgb(${result.r}, ${result.g}, ${result.b})`;
+                
+                // Update intensity display
+                const intensityPercent = result.intensity * 100;
+                intensityDisplay.style.backgroundColor = `rgba(255, 255, 255, ${result.intensity})`;
+                intensityDisplay.style.boxShadow = `0 0 20px rgba(255, 255, 255, ${result.intensity})`;
+                
+                // Update info
+                infoTimer.textContent = frame;
+                infoPrng.textContent = prngState;
+                infoPattern.textContent = patterns[currentPattern].name;
+                infoRgb.textContent = `(${result.r}, ${result.g}, ${result.b})`;
+                infoIntensity.textContent = `${Math.round(intensityPercent)}%`;
+                
+                const hsv = rgbToHsv(result.r, result.g, result.b);
+                infoHsv.textContent = `(${hsv.h}°, ${hsv.s}%, ${hsv.v}%)`;
+            }
+            
+            // Timer callback
+            function onTimer(frame) {
+                speed = parseFloat(speedSelect.value);
+                const result = patterns[currentPattern].execute(frame, prng, speed);
+                updateUI(result, frame, prng.state);
+            }
+            
+            // Event listeners
+            patternSelect.addEventListener('change', (e) => {
+                currentPattern = e.target.value;
+            });
+            
+            speedSelect.addEventListener('change', (e) => {
+                speed = parseFloat(e.target.value);
+            });
+            
+            resetBtn.addEventListener('click', () => {
+                prng.reset();
+            });
+            
+            // Start the timer
+            timer.start(onTimer);
+        }
+        
+        // Initialize when DOM is loaded
+        document.addEventListener('DOMContentLoaded', main);
+    </script>
+</body>
+</html>
