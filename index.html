@@ -411,20 +411,22 @@
                 intensityDisplay.style.backgroundColor = `rgba(255, 255, 255, ${result.intensity})`;
                 intensityDisplay.style.boxShadow = `0 0 20px rgba(255, 255, 255, ${result.intensity})`;
                 
-                // Update info
-                infoTimer.textContent = frame;
-                infoPrng.textContent = prngState;
+                // Update info with fixed-width formatting
+                infoTimer.textContent = frame.toString().padStart(6, ' ');
+                infoPrng.textContent = prngState.toString().padStart(20, '0');
                 infoPattern.textContent = patterns[currentPattern].name;
-                infoRgb.textContent = `(${result.r}, ${result.g}, ${result.b})`;
-                infoIntensity.textContent = `${Math.round(intensityPercent)}%`;
+                infoRgb.textContent = `(${result.r.toString().padStart(3, ' ')}, ${result.g.toString().padStart(3, ' ')}, ${result.b.toString().padStart(3, ' ')})`;
+                infoIntensity.textContent = `${Math.round(intensityPercent).toString().padStart(3, ' ')}%`;
                 
                 const hsv = rgbToHsv(result.r, result.g, result.b);
-                infoHsv.textContent = `(${hsv.h}°, ${hsv.s}%, ${hsv.v}%)`;
+                infoHsv.textContent = `(${hsv.h.toString().padStart(3, ' ')}\u00b0, ${hsv.s.toString().padStart(3, ' ')}%, ${hsv.v.toString().padStart(3, ' ')}%)`;
             }
             
             // Timer callback
             function onTimer(frame) {
                 speed = parseFloat(speedSelect.value);
+                // Always advance PRNG to ensure state changes every frame
+                prng.next();
                 const result = patterns[currentPattern].execute(frame, prng, speed);
                 updateUI(result, frame, prng.state);
             }
