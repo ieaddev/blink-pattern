@@ -369,20 +369,27 @@
         }
         
         // Modulate RGB based on intensity (like grantwinney.com algorithm)
+        // Uses all three channels with proper candle color temperature (1800K-2000K)
         function modulateCandleColor(intensity) {
-            // Base color at full intensity (2000K - warm yellow)
-            const baseR = 255;
-            const baseG = 140;
-            const baseB = 0;
+            // Candle color range: 1800K (deep orange) to 2000K (warm yellow)
+            // At 1800K: R=255, G=90, B=0
+            // At 2000K: R=255, G=145, B=40
+            const t = intensity; // Normalized 0-1
             
-            // Apply intensity modulation similar to grantwinney.com
+            // Interpolate RGB between 1800K and 2000K
+            const r = 255; // Red stays at 255 across candle range
+            const g = Math.round(90 + t * 55); // 90 to 145
+            const b = Math.round(t * 40); // 0 to 40
+            
+            // Apply grantwinney.com modulation:
             // Red: pow(intensity + 0.1, 0.75) - stays brighter longer
-            // Green: pow(intensity, 2) - fades out faster
-            const r = Math.round(baseR * Math.pow(Math.min(intensity + 0.1, 1.0), 0.75));
-            const g = Math.round(baseG * Math.pow(intensity, 2));
-            const b = 0;
+            // Green: pow(intensity, 2) - fades faster
+            // Blue: pow(intensity, 1.5) - fades fastest (contributes to brightness)
+            const finalR = Math.round(r * Math.pow(Math.min(intensity + 0.1, 1.0), 0.75));
+            const finalG = Math.round(g * Math.pow(intensity, 2));
+            const finalB = Math.round(b * Math.pow(intensity, 1.5));
             
-            return { r, g, b };
+            return { r: finalR, g: finalG, b: finalB };
         }
         
         // Get color temperature based on intensity (1800K-2000K range)
