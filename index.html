@@ -147,6 +147,7 @@
             <select id="pattern">
                 <option value="rgbSweep">RGB Color Sweep</option>
                 <option value="candle">Candle Flicker</option>
+                <option value="perlinCandle">Perlin Candle</option>
             </select>
         </div>
         <div class="control-group">
@@ -232,6 +233,86 @@
             }
         }
         
+        // Perlin Noise implementation for natural candle flicker
+        class PerlinNoise {
+            constructor(seed = 0) {
+                this.seed = seed;
+                this.p = this.buildPermutationTable(seed);
+            }
+            
+            buildPermutationTable(seed) {
+                const p = [];
+                const random = new LCG(seed);
+                
+                for (let i = 0; i < 256; i++) {
+                    p[i] = i;
+                }
+                
+                // Fisher-Yates shuffle
+                for (let i = 255; i > 0; i--) {
+                    const j = Math.floor(random.next() * (i + 1));
+                    [p[i], p[j]] = [p[j], p[i]];
+                }
+                
+                return [...p, ...p];
+            }
+            
+            fade(t) {
+                return t * t * t * (t * (t * 6 - 15) + 10);
+            }
+            
+            lerp(t, a, b) {
+                return a + t * (b - a);
+            }
+            
+            grad(hash, x, y) {
+                const h = hash & 15;
+                const u = h < 8 ? x : y;
+                const v = h < 4 ? y : (h === 12 || h === 14 ? x : 0);
+                return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+            }
+            
+            noise2(x, y) {
+                const X = Math.floor(x) & 255;
+                const Y = Math.floor(y) & 255;
+                
+                x -= Math.floor(x);
+                y -= Math.floor(y);
+                
+                const u = this.fade(x);
+                const v = this.fade(y);
+                
+                const A = this.p[X] + Y;
+                const AA = this.p[A];
+                const AB = this.p[A + 1];
+                const B = this.p[X + 1] + Y;
+                const BA = this.p[B];
+                const BB = this.p[B + 1];
+                
+                return this.lerp(
+                    v,
+                    this.lerp(u, this.grad(this.p[AA], x, y), this.grad(this.p[BA], x - 1, y)),
+                    this.lerp(u, this.grad(this.p[AB], x, y - 1), this.grad(this.p[BB], x - 1, y - 1))
+                );
+            }
+            
+            fBm(x, y, octaves = 4, persistence = 0.5, lacunarity = 2.0) {
+                let total = 0;
+                let frequency = 1;
+                let amplitude = 1;
+                let maxValue = 0;
+                
+                for (let i = 0; i < octaves; i++) {
+                    total += this.noise2(x * frequency, y * frequency) * amplitude;
+                    maxValue += amplitude;
+                    amplitude *= persistence;
+                    frequency *= lacunarity;
+                }
+                
+                return total / maxValue;
+            }
+        }
+        
         // Timer at 60Hz
         class Timer {
             constructor(fps = 60) {
@@ -291,18 +372,29 @@
             },
             candle: {
                 name: 'Candle Flicker',
-                // Simulates a real candle with warm colors and flickering brightness
+                // Perlin noise based candle simulation with natural flickering
                 execute: function(timerFrame, prng, speed) {
-                    // Base candle hue (orange/yellow) with slight random variation
-                    const baseHue = 25; // Orange-yellow range
-                    const hueVariation = (prng.next() * 10) - 5; // -5 to +5 degrees
-                    const hue = (baseHue + hueVariation) % 360;
+                    // Create Perlin noise instance with PRNG seed for reproducibility
+                    const perlin = new PerlinNoise(prng.state);
                     
-                    // Saturation varies slightly for more natural look
-                    const saturation = 80 + prng.next() * 20; // 80-100%
+                    // Use time-based x coordinate for smooth animation
+                    const time = timerFrame * speed * 0.01;
                     
-                    // Intensity flickers randomly (70-100%)
-                    const baseIntensity = 0.7 + prng.next() * 0.3; // 0.7 to 1.0
+                    // Generate noise values for different aspects
+                    // fBm for smooth, natural-looking flicker
+                    const flickerNoise = perlin.fBm(time, 0, 4, 0.5, 2.0);
+                    
+                    // Map noise range [-1,1] to intensity range [0.6, 1.0]
+                    const baseIntensity = 0.8 + flickerNoise * 0.2;
+                    
+                    // Add subtle hue variation using different noise octaves
+                    const hueNoise = perlin.fBm(time * 0.3, 100, 2, 0.7, 1.5);
+                    const hueVariation = (hueNoise * 0.5 + 0.5) * 15; // 0 to 15 degrees
+                    const hue = (25 + hueVariation) % 360;
+                    
+                    // Saturation with slight variation
+                    const satNoise = perlin.fBm(time * 0.5, 200, 3, 0.6, 1.8);
+                    const saturation = 70 + (satNoise * 0.5 + 0.5) * 30; // 70-100%
                     
                     // Convert HSV to RGB
                     const rgb = hsvToRgb(hue / 360, saturation / 100, baseIntensity);
@@ -313,6 +405,41 @@
                         b: rgb.b,
                         w: 0, // White LED is ignored
                         intensity: baseIntensity
+                    };
+                }
+            },
+            perlinCandle: {
+                name: 'Perlin Candle',
+                // Advanced perlin noise candle with multi-layered effects
+                execute: function(timerFrame, prng, speed) {
+                    const perlin = new PerlinNoise(prng.state);
+                    const time = timerFrame * speed * 0.01;
+                    
+                    // Primary flicker - fast, small variations
+                    const flicker1 = perlin.fBm(time * 2, 0, 3, 0.6, 2.0);
+                    
+                    // Secondary flicker - slower, larger variations
+                    const flicker2 = perlin.fBm(time * 0.5, 50, 4, 0.4, 2.0);
+                    
+                    // Combine flickers for more natural effect
+                    const intensity = 0.7 + (flicker1 * 0.15 + flicker2 * 0.1) + 0.15;
+                    
+                    // Hue with slow drift and fast flicker
+                    const hueSlow = perlin.fBm(time * 0.1, 100, 2, 0.8, 1.5);
+                    const hueFast = perlin.fBm(time * 3, 200, 3, 0.5, 1.8);
+                    const hue = (20 + hueSlow * 10 + hueFast * 5 + 360) % 360;
+                    
+                    // Saturation with subtle variation
+                    const saturation = 85 + perlin.fBm(time * 0.3, 300, 2, 0.7, 1.5) * 15;
+                    
+                    const rgb = hsvToRgb(hue / 360, saturation / 100, Math.min(intensity, 1.0));
+                    
+                    return {
+                        r: rgb.r,
+                        g: rgb.g,
+                        b: rgb.b,
+                        w: 0,
+                        intensity: Math.min(intensity, 1.0)
                     };
                 }
             }
