@@ -344,6 +344,55 @@
             }
         }
         
+        // Color temperature (Kelvin) to RGB conversion for candle colors (1800K-2000K)
+        function kelvinToRgb(kelvin) {
+            // Clamp to candle range
+            kelvin = Math.max(1800, Math.min(2000, kelvin));
+            
+            // Normalize from 1800K-2000K to 0-1
+            const t = (kelvin - 1800) / 200;
+            
+            // 1800K = deep orange/red (more red, less green)
+            // 2000K = warm yellow (more balanced red/green)
+            // Blue is always 0 for candle colors
+            
+            // Red: 255 at 1800K, slightly less at 2000K
+            const r = Math.round(220 + t * 35); // 220-255
+            
+            // Green: 80 at 1800K, 140 at 2000K
+            const g = Math.round(80 + t * 60); // 80-140
+            
+            // Blue: always 0 for candle
+            const b = 0;
+            
+            return { r, g, b };
+        }
+        
+        // Modulate RGB based on intensity (like grantwinney.com algorithm)
+        function modulateCandleColor(intensity) {
+            // Base color at full intensity (2000K - warm yellow)
+            const baseR = 255;
+            const baseG = 140;
+            const baseB = 0;
+            
+            // Apply intensity modulation similar to grantwinney.com
+            // Red: pow(intensity + 0.1, 0.75) - stays brighter longer
+            // Green: pow(intensity, 2) - fades out faster
+            const r = Math.round(baseR * Math.pow(Math.min(intensity + 0.1, 1.0), 0.75));
+            const g = Math.round(baseG * Math.pow(intensity, 2));
+            const b = 0;
+            
+            return { r, g, b };
+        }
+        
+        // Get color temperature based on intensity (1800K-2000K range)
+        function getCandleTemperature(intensity) {
+            // Higher intensity = hotter (more yellow, ~2000K)
+            // Lower intensity = cooler (more orange/red, ~1800K)
+            // Map intensity [0,1] to temperature [1800,2000]
+            return 1800 + (intensity * 200);
+        }
+        
         // Blink patterns
         const patterns = {
             rgbSweep: {
@@ -372,45 +421,33 @@
             },
             candle: {
                 name: 'Candle Flicker',
-                // Perlin noise based candle simulation with natural flickering
+                // Perlin noise based candle with 1800K-2000K color temperature
                 execute: function(timerFrame, prng, speed) {
-                    // Create Perlin noise instance with PRNG seed for reproducibility
                     const perlin = new PerlinNoise(prng.state);
-                    
-                    // Use time-based x coordinate for smooth animation
                     const time = timerFrame * speed * 0.01;
                     
-                    // Generate noise values for different aspects
                     // fBm for smooth, natural-looking flicker
                     const flickerNoise = perlin.fBm(time, 0, 4, 0.5, 2.0);
                     
                     // Map noise range [-1,1] to intensity range [0.6, 1.0]
-                    const baseIntensity = 0.8 + flickerNoise * 0.2;
+                    const intensity = 0.8 + flickerNoise * 0.2;
                     
-                    // Add subtle hue variation using different noise octaves
-                    const hueNoise = perlin.fBm(time * 0.3, 100, 2, 0.7, 1.5);
-                    const hueVariation = (hueNoise * 0.5 + 0.5) * 15; // 0 to 15 degrees
-                    const hue = (25 + hueVariation) % 360;
-                    
-                    // Saturation with slight variation
-                    const satNoise = perlin.fBm(time * 0.5, 200, 3, 0.6, 1.8);
-                    const saturation = 70 + (satNoise * 0.5 + 0.5) * 30; // 70-100%
-                    
-                    // Convert HSV to RGB
-                    const rgb = hsvToRgb(hue / 360, saturation / 100, baseIntensity);
+                    // Get RGB based on intensity using grantwinney.com algorithm
+                    // Higher intensity = more yellow (2000K), lower = more orange/red (1800K)
+                    const rgb = modulateCandleColor(intensity);
                     
                     return {
                         r: rgb.r,
                         g: rgb.g,
                         b: rgb.b,
-                        w: 0, // White LED is ignored
-                        intensity: baseIntensity
+                        w: 0,
+                        intensity: intensity
                     };
                 }
             },
             perlinCandle: {
                 name: 'Perlin Candle',
-                // Advanced perlin noise candle with multi-layered effects
+                // Advanced perlin noise candle with 1800K-2000K color temperature
                 execute: function(timerFrame, prng, speed) {
                     const perlin = new PerlinNoise(prng.state);
                     const time = timerFrame * speed * 0.01;
@@ -422,24 +459,19 @@
                     const flicker2 = perlin.fBm(time * 0.5, 50, 4, 0.4, 2.0);
                     
                     // Combine flickers for more natural effect
-                    const intensity = 0.7 + (flicker1 * 0.15 + flicker2 * 0.1) + 0.15;
+                    let intensity = 0.7 + (flicker1 * 0.15 + flicker2 * 0.1) + 0.15;
+                    intensity = Math.min(intensity, 1.0);
                     
-                    // Hue with slow drift and fast flicker
-                    const hueSlow = perlin.fBm(time * 0.1, 100, 2, 0.8, 1.5);
-                    const hueFast = perlin.fBm(time * 3, 200, 3, 0.5, 1.8);
-                    const hue = (20 + hueSlow * 10 + hueFast * 5 + 360) % 360;
-                    
-                    // Saturation with subtle variation
-                    const saturation = 85 + perlin.fBm(time * 0.3, 300, 2, 0.7, 1.5) * 15;
-                    
-                    const rgb = hsvToRgb(hue / 360, saturation / 100, Math.min(intensity, 1.0));
+                    // Get RGB using color temperature modulation
+                    // Based on grantwinney.com: red uses pow(intensity+0.1, 0.75), green uses pow(intensity, 2)
+                    const rgb = modulateCandleColor(intensity);
                     
                     return {
                         r: rgb.r,
                         g: rgb.g,
                         b: rgb.b,
                         w: 0,
-                        intensity: Math.min(intensity, 1.0)
+                        intensity: intensity
                     };
                 }
             }
