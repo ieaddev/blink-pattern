@@ -87,31 +87,19 @@
     };
 
     // ============================================
-    // LCG PRNG implementation with BigInt
+    // PRNG Interface
     // ============================================
 
     /**
-     * Linear Congruential Generator using BigInt for true 64-bit arithmetic
+     * Abstract base class for Pseudo-Random Number Generators
      */
-    class LCG {
-        /**
-         * @param {bigint|number} [seed=42n] - Initial seed value
-         */
-        constructor(seed = 42n) {
-            this.state = BigInt(seed);
-            this.a = LCG_PARAMS.A;
-            this.c = LCG_PARAMS.C;
-            this.m = LCG_PARAMS.M;
-        }
-
+    class PRNG {
         /**
          * Generate next random number in [0, 1)
          * @returns {number} Random value between 0 (inclusive) and 1 (exclusive)
          */
         next() {
-            this.state = (this.a * this.state + this.c) % this.m;
-            // Convert BigInt to number in [0, 1) range
-            return Number(this.state) / Number(this.m);
+            throw new Error('Method next() must be implemented');
         }
 
         /**
@@ -125,10 +113,66 @@
 
         /**
          * Reset the PRNG state
-         * @param {bigint|number} [seed=42n] - New seed value
+         * @param {bigint|number} [seed] - New seed value (implementation-specific default if not provided)
          */
-        reset(seed = 42n) {
+        reset(seed) {
+            throw new Error('Method reset() must be implemented');
+        }
+
+        /**
+         * Get current state as string
+         * @returns {string} Current state value
+         */
+        getState() {
+            throw new Error('Method getState() must be implemented');
+        }
+
+        /**
+         * Get PRNG name
+         * @returns {string} PRNG name
+         */
+        getName() {
+            throw new Error('Method getName() must be implemented');
+        }
+    }
+
+    // ============================================
+    // LCG PRNG implementation with BigInt
+    // ============================================
+
+    /**
+     * Linear Congruential Generator using BigInt for true 64-bit arithmetic
+     * Implements PRNG interface
+     */
+    class LCG extends PRNG {
+        /**
+         * @param {bigint|number} [seed=42n] - Initial seed value
+         */
+        constructor(seed = 42n) {
+            super();
             this.state = BigInt(seed);
+            this.a = LCG_PARAMS.A;
+            this.c = LCG_PARAMS.C;
+            this.m = LCG_PARAMS.M;
+            this.defaultSeed = 42n;
+        }
+
+        /**
+         * Generate next random number in [0, 1)
+         * @returns {number} Random value between 0 (inclusive) and 1 (exclusive)
+         */
+        next() {
+            this.state = (this.a * this.state + this.c) % this.m;
+            // Convert BigInt to number in [0, 1) range
+            return Number(this.state) / Number(this.m);
+        }
+
+        /**
+         * Reset the PRNG state
+         * @param {bigint|number} [seed] - New seed value (defaults to 42n)
+         */
+        reset(seed) {
+            this.state = seed !== undefined ? BigInt(seed) : this.defaultSeed;
         }
 
         /**
@@ -138,17 +182,101 @@
         getState() {
             return this.state.toString();
         }
+
+        /**
+         * Get PRNG name
+         * @returns {string} PRNG name
+         */
+        getName() {
+            return 'LCG';
+        }
     }
 
     // ============================================
-    // LFSR with Shaping class for candle flicker
+    // LFSR PRNG implementation
+    // ============================================
+
+    /**
+     * Linear Feedback Shift Register - General purpose PRNG
+     * Feedback polynomial: x^8 + x^4 + x^3 + x^2 + 1
+     * Implements PRNG interface
+     */
+    class LFSR extends PRNG {
+        /**
+         * @param {number} [seed=0x81] - Initial seed value (8-bit)
+         */
+        constructor(seed = LFSR_PARAMS.DEFAULT_SEED) {
+            super();
+            this.state = seed || LFSR_PARAMS.DEFAULT_SEED;
+            this.defaultSeed = LFSR_PARAMS.DEFAULT_SEED;
+        }
+
+        /**
+         * Generate next LFSR bit
+         * @returns {number} Next bit (0 or 1)
+         */
+        nextBit() {
+            const feedback = ((this.state >> 0) ^ (this.state >> 2) ^ 
+                            (this.state >> 3) ^ (this.state >> 4)) & 1;
+            this.state = ((this.state >> 1) | (feedback << 7)) & 0xFF;
+            return feedback;
+        }
+
+        /**
+         * Generate next random number in [0, 1)
+         * @returns {number} Random value between 0 (inclusive) and 1 (exclusive)
+         */
+        next() {
+            this.nextBit();
+            // Return state as a number in [0, 1) range
+            return this.state / 256.0;
+        }
+
+        /**
+         * Generate next random integer in [0, max)
+         * @param {number} max - Upper bound (exclusive)
+         * @returns {number} Random integer in [0, max)
+         */
+        nextInt(max) {
+            this.nextBit();
+            return Math.floor((this.state / 256.0) * max);
+        }
+
+        /**
+         * Reset LFSR state
+         * @param {number} [seed] - New seed value (defaults to 0x81)
+         */
+        reset(seed) {
+            this.state = seed !== undefined ? seed : this.defaultSeed;
+        }
+
+        /**
+         * Get current state as string
+         * @returns {string} Current state value
+         */
+        getState() {
+            return this.state.toString(16).padStart(2, '0');
+        }
+
+        /**
+         * Get PRNG name
+         * @returns {string} PRNG name
+         */
+        getName() {
+            return 'LFSR';
+        }
+    }
+
+    // ============================================
+    // LFSR with Shaping class for candle flicker (legacy, kept for backward compatibility)
     // ============================================
 
     /**
      * Linear Feedback Shift Register with shaping filter
      * Extremely low computational cost
+     * This is the original LFSR implementation with flicker filtering
      */
-    class LFSR {
+    class LFSRWithShaping {
         /**
          * @param {number} [seed=0x81] - Initial seed value
          */
@@ -194,122 +322,7 @@
     }
 
     // ============================================
-    // Damped Harmonic Oscillator class for candle flicker
-    // ============================================
-
-    /**
-     * Damped Harmonic Oscillator simulating physical candle flicker
-     * Models buoyancy-driven Kelvin-Helmholtz instability
-     */
-    class DampedHarmonicOscillator {
-        /**
-         * @param {number} [seed=42] - Seed for internal PRNG
-         */
-        constructor(seed = 42) {
-            this.position = 0.0;
-            this.velocity = 0.0;
-            this.frequency = OSCILLATOR_PARAMS.FREQUENCY;
-            this.damping = OSCILLATOR_PARAMS.DAMPING;
-            this.prng = new LCG(seed);
-            this.deltaTime = OSCILLATOR_PARAMS.DELTA_TIME;
-        }
-
-        /**
-         * Generate next oscillator value
-         * @returns {number} Intensity value in [0.6, 1.0]
-         */
-        next() {
-            // Add random disturbance occasionally (simulates air currents)
-            if (this.prng.next() < OSCILLATOR_PARAMS.DISTURBANCE_CHANCE) {
-                this.velocity += (this.prng.next() * 2 - 1) * OSCILLATOR_PARAMS.KICK_MAGNITUDE;
-            }
-
-            // Update oscillator using simple harmonic motion with damping
-            const acceleration = -this.frequency * this.frequency * this.position - 
-                                this.damping * this.velocity;
-            this.velocity += acceleration * this.deltaTime;
-            this.position += this.velocity * this.deltaTime;
-
-            // Apply damping to velocity (exponential decay)
-            this.velocity *= this.damping;
-
-            // Map position to intensity range [0.6, 1.0]
-            const normalized = (this.position + 1.0) / 2.0; // Map [-1,1] to [0,1]
-            const intensity = 0.8 + normalized * 0.2; // [0.8, 1.0]
-
-            return Math.min(Math.max(intensity, CANDLE_PARAMS.MIN_INTENSITY), 
-                           CANDLE_PARAMS.MAX_INTENSITY);
-        }
-
-        /**
-         * Reset oscillator state
-         * @param {number} [seed=42] - New seed value
-         */
-        reset(seed = 42) {
-            this.position = 0.0;
-            this.velocity = 0.0;
-            this.prng.reset(seed);
-        }
-    }
-
-    // ============================================
-    // Constrained Random Walk class for candle flicker
-    // ============================================
-
-    /**
-     * Constrained Random Walk with occasional larger flickers
-     * Simple but produces natural slow variations
-     */
-    class ConstrainedRandomWalk {
-        /**
-         * @param {number} [seed=42] - Seed for internal PRNG
-         */
-        constructor(seed = 42) {
-            this.brightness = RANDOM_WALK_PARAMS.START_BRIGHTNESS;
-            this.minBrightness = RANDOM_WALK_PARAMS.MIN_BRIGHTNESS;
-            this.maxBrightness = RANDOM_WALK_PARAMS.MAX_BRIGHTNESS;
-            this.prng = new LCG(seed);
-        }
-
-        /**
-         * Generate next brightness value
-         * @returns {number} Intensity value in [0.59, 0.94]
-         */
-        next() {
-            // Random step: small changes most of the time
-            const step = this.prng.nextInt(RANDOM_WALK_PARAMS.SMALL_STEP_RANGE) - 
-                        (RANDOM_WALK_PARAMS.SMALL_STEP_RANGE - 1) / 2;
-            this.brightness += step;
-
-            // Constrain to bounds
-            this.brightness = Math.max(this.minBrightness, 
-                                       Math.min(this.maxBrightness, this.brightness));
-
-            // Add occasional larger flicker
-            if (this.prng.next() < RANDOM_WALK_PARAMS.LARGE_STEP_CHANCE) {
-                const largeStep = this.prng.nextInt(RANDOM_WALK_PARAMS.LARGE_STEP_RANGE) - 
-                                 (RANDOM_WALK_PARAMS.LARGE_STEP_RANGE - 1) / 2;
-                this.brightness += largeStep;
-                this.brightness = Math.max(this.minBrightness, 
-                                           Math.min(this.maxBrightness, this.brightness));
-            }
-
-            // Map to intensity range [0.59, 0.94]
-            return this.brightness / 255.0;
-        }
-
-        /**
-         * Reset random walk state
-         * @param {number} [seed=42] - New seed value
-         */
-        reset(seed = 42) {
-            this.brightness = RANDOM_WALK_PARAMS.START_BRIGHTNESS;
-            this.prng.reset(seed);
-        }
-    }
-
-    // ============================================
-    // Perlin Noise implementation for natural candle flicker
+    // Perlin Noise PRNG Wrapper
     // ============================================
 
     /**
@@ -325,13 +338,17 @@
         }
 
         /**
-         * Build permutation table using LCG
+         * Build permutation table using a PRNG
          * @param {bigint|number} seed - Seed value
          * @returns {number[]} Permutation table
          */
         buildPermutationTable(seed) {
             const p = [];
-            const random = new LCG(seed);
+            // Use a simple LCG for building the permutation table
+            let state = BigInt(seed || 0);
+            const a = 1664525n;
+            const c = 1013904223n;
+            const m = 2n ** 32n;
 
             for (let i = 0; i < 256; i++) {
                 p[i] = i;
@@ -339,7 +356,8 @@
 
             // Fisher-Yates shuffle
             for (let i = 255; i > 0; i--) {
-                const j = Math.floor(random.next() * (i + 1));
+                state = (a * state + c) % m;
+                const j = Number(state) % (i + 1);
                 [p[i], p[j]] = [p[j], p[i]];
             }
 
@@ -434,6 +452,191 @@
 
             return total / maxValue;
         }
+
+        /**
+         * Reset with new seed
+         * @param {bigint|number} [seed=0] - New seed value
+         */
+        reset(seed = 0) {
+            this.seed = seed;
+            this.p = this.buildPermutationTable(seed);
+        }
+
+        /**
+         * Get current seed as string
+         * @returns {string} Current seed value
+         */
+        getState() {
+            return BigInt(this.seed).toString();
+        }
+    }
+
+    /**
+     * Perlin Noise PRNG Wrapper - models Perlin noise as a PRNG
+     * Implements PRNG interface
+     */
+    class PerlinNoisePRNG extends PRNG {
+        /**
+         * @param {bigint|number} [seed=0] - Initial seed value
+         */
+        constructor(seed = 0) {
+            super();
+            this.perlin = new PerlinNoise(seed);
+            this.counter = 0;
+            this.defaultSeed = 0;
+        }
+
+        /**
+         * Generate next random number in [0, 1)
+         * Uses Perlin noise fBm at increasing x coordinates
+         * @returns {number} Random value between 0 (inclusive) and 1 (exclusive)
+         */
+        next() {
+            // Use fBm to get a noise value and map from [-1,1] to [0,1)
+            const noise = this.perlin.fBm(this.counter, 0, 4, 0.5, 2.0);
+            this.counter++;
+            return (noise + 1) / 2;
+        }
+
+        /**
+         * Reset the PRNG state
+         * @param {bigint|number} [seed] - New seed value
+         */
+        reset(seed) {
+            this.perlin.reset(seed !== undefined ? seed : this.defaultSeed);
+            this.counter = 0;
+        }
+
+        /**
+         * Get current state as string
+         * @returns {string} Current state value
+         */
+        getState() {
+            return `${this.perlin.getState()}_${this.counter}`;
+        }
+
+        /**
+         * Get PRNG name
+         * @returns {string} PRNG name
+         */
+        getName() {
+            return 'Perlin';
+        }
+    }
+
+    // ============================================
+    // Damped Harmonic Oscillator class for candle flicker
+    // ============================================
+
+    /**
+     * Damped Harmonic Oscillator simulating physical candle flicker
+     * Models buoyancy-driven Kelvin-Helmholtz instability
+     */
+    class DampedHarmonicOscillator {
+        /**
+         * @param {PRNG} [prng] - PRNG instance for random disturbances
+         */
+        constructor(prng) {
+            this.position = 0.0;
+            this.velocity = 0.0;
+            this.frequency = OSCILLATOR_PARAMS.FREQUENCY;
+            this.damping = OSCILLATOR_PARAMS.DAMPING;
+            this.prng = prng || new LCG();
+            this.deltaTime = OSCILLATOR_PARAMS.DELTA_TIME;
+        }
+
+        /**
+         * Generate next oscillator value
+         * @returns {number} Intensity value in [0.6, 1.0]
+         */
+        next() {
+            // Add random disturbance occasionally (simulates air currents)
+            if (this.prng.next() < OSCILLATOR_PARAMS.DISTURBANCE_CHANCE) {
+                this.velocity += (this.prng.next() * 2 - 1) * OSCILLATOR_PARAMS.KICK_MAGNITUDE;
+            }
+
+            // Update oscillator using simple harmonic motion with damping
+            const acceleration = -this.frequency * this.frequency * this.position - 
+                                this.damping * this.velocity;
+            this.velocity += acceleration * this.deltaTime;
+            this.position += this.velocity * this.deltaTime;
+
+            // Apply damping to velocity (exponential decay)
+            this.velocity *= this.damping;
+
+            // Map position to intensity range [0.6, 1.0]
+            const normalized = (this.position + 1.0) / 2.0; // Map [-1,1] to [0,1]
+            const intensity = 0.8 + normalized * 0.2; // [0.8, 1.0]
+
+            return Math.min(Math.max(intensity, CANDLE_PARAMS.MIN_INTENSITY), 
+                           CANDLE_PARAMS.MAX_INTENSITY);
+        }
+
+        /**
+         * Reset oscillator state
+         * @param {PRNG} [prng] - New PRNG instance
+         */
+        reset(prng) {
+            this.position = 0.0;
+            this.velocity = 0.0;
+            this.prng = prng || new LCG();
+        }
+    }
+
+    // ============================================
+    // Constrained Random Walk class for candle flicker
+    // ============================================
+
+    /**
+     * Constrained Random Walk with occasional larger flickers
+     * Simple but produces natural slow variations
+     */
+    class ConstrainedRandomWalk {
+        /**
+         * @param {PRNG} [prng] - PRNG instance for random steps
+         */
+        constructor(prng) {
+            this.brightness = RANDOM_WALK_PARAMS.START_BRIGHTNESS;
+            this.minBrightness = RANDOM_WALK_PARAMS.MIN_BRIGHTNESS;
+            this.maxBrightness = RANDOM_WALK_PARAMS.MAX_BRIGHTNESS;
+            this.prng = prng || new LCG();
+        }
+
+        /**
+         * Generate next brightness value
+         * @returns {number} Intensity value in [0.59, 0.94]
+         */
+        next() {
+            // Random step: small changes most of the time
+            const step = this.prng.nextInt(RANDOM_WALK_PARAMS.SMALL_STEP_RANGE) - 
+                        (RANDOM_WALK_PARAMS.SMALL_STEP_RANGE - 1) / 2;
+            this.brightness += step;
+
+            // Constrain to bounds
+            this.brightness = Math.max(this.minBrightness, 
+                                       Math.min(this.maxBrightness, this.brightness));
+
+            // Add occasional larger flicker
+            if (this.prng.next() < RANDOM_WALK_PARAMS.LARGE_STEP_CHANCE) {
+                const largeStep = this.prng.nextInt(RANDOM_WALK_PARAMS.LARGE_STEP_RANGE) - 
+                                 (RANDOM_WALK_PARAMS.LARGE_STEP_RANGE - 1) / 2;
+                this.brightness += largeStep;
+                this.brightness = Math.max(this.minBrightness, 
+                                           Math.min(this.maxBrightness, this.brightness));
+            }
+
+            // Map to intensity range [0.59, 0.94]
+            return this.brightness / 255.0;
+        }
+
+        /**
+         * Reset random walk state
+         * @param {PRNG} [prng] - New PRNG instance
+         */
+        reset(prng) {
+            this.brightness = RANDOM_WALK_PARAMS.START_BRIGHTNESS;
+            this.prng = prng || new LCG();
+        }
     }
 
     // ============================================
@@ -462,110 +665,71 @@
          * @param {Function} callback - Function to call on each frame
          */
         start(callback) {
-            if (this.isRunning) {
-                this.stop();
-            }
             this.callback = callback;
-            this.frame = 0;
-            this.lastTime = performance.now();
             this.isRunning = true;
-            this.run();
+            this.lastTime = performance.now();
+            this._tick();
+        }
+
+        /**
+         * Internal tick function
+         */
+        _tick() {
+            if (!this.isRunning) return;
+
+            const now = performance.now();
+            const elapsed = now - this.lastTime;
+
+            if (elapsed >= this.interval) {
+                this.frame++;
+                if (this.callback) {
+                    this.callback(this.frame);
+                }
+                this.lastTime = now - (elapsed % this.interval);
+            }
+
+            this.animationFrameId = requestAnimationFrame(() => this._tick());
         }
 
         /**
          * Stop the timer
          */
         stop() {
+            this.isRunning = false;
             if (this.animationFrameId) {
                 cancelAnimationFrame(this.animationFrameId);
                 this.animationFrameId = null;
             }
-            this.isRunning = false;
-        }
-
-        /**
-         * Internal run loop with drift correction
-         */
-        run() {
-            const now = performance.now();
-            const elapsed = now - this.lastTime;
-
-            if (elapsed >= this.interval) {
-                this.callback(this.frame);
-                this.frame++;
-                // Use fixed timestep to prevent drift accumulation
-                this.lastTime += this.interval;
-                // If we're significantly behind, skip frames but don't accumulate too much
-                if (now - this.lastTime > this.interval * 2) {
-                    this.lastTime = now;
-                }
-            }
-
-            this.animationFrameId = requestAnimationFrame(() => this.run());
         }
     }
 
     // ============================================
-    // Color conversion utilities
+    // Utility Functions
     // ============================================
-
-    /**
-     * Modulate RGB based on intensity using grantwinney.com algorithm
-     * Uses candle color temperature (1800K-2000K)
-     * @param {number} intensity - Intensity value in [0, 1]
-     * @returns {Object} RGB color object with r, g, b in [0, 255]
-     */
-    function modulateCandleColor(intensity) {
-        // Clamp intensity to [0, 1]
-        intensity = Math.max(0, Math.min(1, intensity));
-
-        // Candle color range: 1800K (deep orange) to 2000K (warm yellow)
-        // At 1800K: R=255, G=90, B=0
-        // At 2000K: R=255, G=145, B=40
-
-        // Interpolate RGB between 1800K and 2000K
-        const r = 255; // Red stays at 255 across candle range
-        const g = Math.round(90 + intensity * 55); // 90 to 145
-        const b = Math.round(intensity * 40); // 0 to 40
-
-        // Apply grantwinney.com modulation:
-        // Red: pow(intensity + 0.1, 0.75) - stays brighter longer
-        // Green: pow(intensity, 2) - fades faster
-        // Blue: pow(intensity, 1.5) - fades fastest
-        const finalR = Math.round(r * Math.pow(Math.min(intensity + 0.1, 1.0), 0.75));
-        const finalG = Math.round(g * Math.pow(intensity, 2));
-        const finalB = Math.round(b * Math.pow(intensity, 1.5));
-
-        return { r: finalR, g: finalG, b: finalB };
-    }
 
     /**
      * Convert HSV to RGB
-     * @param {number} h - Hue in [0, 1]
-     * @param {number} s - Saturation in [0, 1]
-     * @param {number} v - Value in [0, 1]
-     * @returns {Object} RGB color object with values in [0, 255]
+     * @param {number} h - Hue [0, 1]
+     * @param {number} s - Saturation [0, 1]
+     * @param {number} v - Value [0, 1]
+     * @returns {Object} RGB object with r, g, b in [0, 255]
      */
     function hsvToRgb(h, s, v) {
         let r, g, b;
+        const i = Math.floor(h * 6);
+        const f = h * 6 - i;
+        const p = v * (1 - s);
+        const q = v * (1 - f * s);
+        const t = v * (1 - (1 - f) * s);
 
-        if (s === 0) {
-            r = g = b = v;
-        } else {
-            const i = Math.floor(h * 6);
-            const f = h * 6 - i;
-            const p = v * (1 - s);
-            const q = v * (1 - f * s);
-            const t = v * (1 - (1 - f) * s);
-
-            switch (i % 6) {
-                case 0: r = v; g = t; b = p; break;
-                case 1: r = q; g = v; b = p; break;
-                case 2: r = p; g = v; b = t; break;
-                case 3: r = p; g = q; b = v; break;
-                case 4: r = t; g = p; b = v; break;
-                case 5: r = v; g = p; b = q; break;
-            }
+        switch (i % 6) {
+            case 0: r = v; g = t; b = p; break;
+            case 1: r = q; g = v; b = p; break;
+            case 2: r = p; g = v; b = t; break;
+            case 3: r = p; g = q; b = v; break;
+            case 4: r = t; g = p; b = v; break;
+            case 5: r = v; g = p; b = q; break;
+            default: r = g = b = 0;
         }
 
         return {
@@ -576,42 +740,93 @@
     }
 
     /**
-     * Convert RGB to HSV for display
-     * @param {number} r - Red value in [0, 255]
-     * @param {number} g - Green value in [0, 255]
-     * @param {number} b - Blue value in [0, 255]
-     * @returns {Object} HSV color object with h in [0, 360], s and v in [0, 100]
+     * Convert RGB to HSV
+     * @param {number} r - Red [0, 255]
+     * @param {number} g - Green [0, 255]
+     * @param {number} b - Blue [0, 255]
+     * @returns {Object} HSV object with h [0, 360], s [0, 100], v [0, 100]
      */
     function rgbToHsv(r, g, b) {
-        r = r / 255;
-        g = g / 255;
-        b = b / 255;
-
+        r /= 255; g /= 255; b /= 255;
         const max = Math.max(r, g, b);
         const min = Math.min(r, g, b);
-        const delta = max - min;
-
-        let h = 0;
-        if (delta > 0) {
-            if (max === r) {
-                h = 60 * (((g - b) / delta) % 6);
-            } else if (max === g) {
-                h = 60 * (((b - r) / delta) + 2);
-            } else {
-                h = 60 * (((r - g) / delta) + 4);
-            }
-        }
-
-        if (h < 0) h += 360;
-
-        const s = max === 0 ? 0 : delta / max;
+        const d = max - min;
+        let h, s = (max === 0 ? 0 : d / max);
         const v = max;
 
+        switch (max) {
+            case min: h = 0; break;
+            case r: h = (g - b) + d * (g < b ? 6 : 0); h /= d; break;
+            case g: h = (b - r) + d * 2; h /= d; break;
+            case b: h = (r - g) + d * 4; h /= d; break;
+        }
+
+        h = Math.round(h * 60);
+        if (h < 0) h += 360;
+
         return {
-            h: Math.round(h),
+            h: h,
             s: Math.round(s * 100),
             v: Math.round(v * 100)
         };
+    }
+
+    /**
+     * Modulate candle color based on intensity
+     * Uses 1800K-2000K color temperature range
+     * @param {number} intensity - Intensity value [0, 1]
+     * @returns {Object} RGB object with r, g, b in [0, 255]
+     */
+    function modulateCandleColor(intensity) {
+        // Base color at full intensity (1800K candle color)
+        const baseR = 255;
+        const baseG = 147;
+        const baseB = 41;
+
+        // At lower intensity, shift toward deeper red/orange
+        const minR = 255;
+        const minG = 80;
+        const minB = 0;
+
+        // Interpolate based on intensity
+        const r = Math.round(minR + (baseR - minR) * intensity);
+        const g = Math.round(minG + (baseG - minG) * intensity);
+        const b = Math.round(minB + (baseB - minB) * intensity);
+
+        return { r, g, b };
+    }
+
+    // ============================================
+    // PRNG Factory
+    // ============================================
+
+    /**
+     * PRNG types available
+     */
+    const PRNG_TYPES = {
+        lcg: { name: 'LCG', class: LCG, defaultSeed: 42n },
+        lfsr: { name: 'LFSR', class: LFSR, defaultSeed: 0x81 },
+        perlin: { name: 'Perlin', class: PerlinNoisePRNG, defaultSeed: 0 }
+    };
+
+    /**
+     * Create a PRNG instance based on type
+     * @param {string} type - PRNG type ('lcg', 'lfsr', 'perlin')
+     * @param {bigint|number} [seed] - Optional seed value
+     * @returns {PRNG} PRNG instance
+     */
+    function createPRNG(type, seed) {
+        const prngConfig = PRNG_TYPES[type];
+        if (!prngConfig) {
+            console.warn(`Unknown PRNG type: ${type}, falling back to LCG`);
+            return new LCG(seed);
+        }
+        
+        if (seed !== undefined) {
+            return new prngConfig.class(seed);
+        } else {
+            return new prngConfig.class(prngConfig.defaultSeed);
+        }
     }
 
     // ============================================
@@ -620,8 +835,7 @@
 
     /**
      * Pattern definitions
-     * Each pattern has a name and an execute function
-     * @type {Object.<string, {name: string, execute: Function, usesPerlin?: boolean}>}
+     * Each pattern has: name, usesPerlin (or usesPRNG), execute function
      */
     const patterns = {
         rgbSweep: {
@@ -630,7 +844,7 @@
             /**
              * Goes around color circle with constant intensity
              * @param {number} timerFrame - Current frame number
-             * @param {LCG} prng - PRNG instance
+             * @param {PRNG} prng - PRNG instance
              * @param {number} speed - Speed multiplier
              * @returns {Object} Pattern result with r, g, b, intensity
              */
@@ -660,15 +874,16 @@
             /**
              * Perlin noise based candle with 1800K-2000K color temperature
              * @param {number} timerFrame - Current frame number
-             * @param {PerlinNoise} perlin - Perlin noise instance
+             * @param {PerlinNoisePRNG|PerlinNoise} perlin - Perlin noise instance
              * @param {number} speed - Speed multiplier
              * @returns {Object} Pattern result with r, g, b, intensity
              */
             execute: function(timerFrame, perlin, speed) {
+                const perlinNoise = perlin.perlin || perlin;
                 const time = timerFrame * speed * TIMER_PARAMS.TIME_SCALE;
 
                 // fBm for smooth, natural-looking flicker
-                const flickerNoise = perlin.fBm(time, 0, 4, 0.5, 2.0);
+                const flickerNoise = perlinNoise.fBm(time, 0, 4, 0.5, 2.0);
 
                 // Map noise range [-1,1] to intensity range [0.6, 1.0]
                 const intensity = CANDLE_PARAMS.BASE_INTENSITY + flickerNoise * CANDLE_PARAMS.FLICKER_RANGE;
@@ -690,24 +905,25 @@
             /**
              * Advanced perlin noise candle with 1800K-2000K color temperature
              * @param {number} timerFrame - Current frame number
-             * @param {PerlinNoise} perlin - Perlin noise instance
+             * @param {PerlinNoisePRNG|PerlinNoise} perlin - Perlin noise instance
              * @param {number} speed - Speed multiplier
              * @returns {Object} Pattern result with r, g, b, intensity
              */
             execute: function(timerFrame, perlin, speed) {
+                const perlinNoise = perlin.perlin || perlin;
                 const time = timerFrame * speed * TIMER_PARAMS.TIME_SCALE;
 
                 // Primary flicker - fast, small variations
-                const flicker1 = perlin.fBm(time * 2, 0, 3, 0.6, 2.0);
+                const flicker1 = perlinNoise.fBm(time * 2, 0, 3, 0.6, 2.0);
 
                 // Secondary flicker - slower, larger variations
-                const flicker2 = perlin.fBm(time * 0.5, 50, 4, 0.4, 2.0);
+                const flicker2 = perlinNoise.fBm(time * 0.5, 50, 4, 0.4, 2.0);
 
                 // Combine flickers for more natural effect
                 let intensity = 0.7 + (flicker1 * 0.15 + flicker2 * 0.1) + 0.15;
                 intensity = Math.min(intensity, CANDLE_PARAMS.MAX_INTENSITY);
 
-                // Get RGB using color temperature modulation
+                // Get RGB using candle color modulation
                 const rgb = modulateCandleColor(intensity);
 
                 return {
@@ -722,24 +938,24 @@
             name: 'LFSR Candle',
             usesPerlin: false,
             /**
-             * LFSR with shaping filter - extremely low computational cost
-             * Uses deterministic pseudo-random with analog shaping
+             * Uses the selected PRNG with shaping filter
              * @param {number} timerFrame - Current frame number
-             * @param {LCG} prng - PRNG instance (used for LFSR seed)
+             * @param {PRNG} prng - PRNG instance
              * @param {number} speed - Speed multiplier
              * @returns {Object} Pattern result with r, g, b, intensity
              */
             execute: function(timerFrame, prng, speed) {
-                // Use frame as seed for LFSR to get different sequences
-                const lfsr = new LFSR(timerFrame % 256);
-
-                // Run LFSR for a few cycles based on speed
-                for (let i = 0; i < Math.max(1, Math.floor(speed)); i++) {
-                    lfsr.next();
+                // Use PRNG to get a random value
+                let intensityValue = prng.next();
+                
+                // Apply low-pass filter for smoother flicker
+                // We'll simulate the filter effect by averaging multiple samples
+                for (let i = 1; i < Math.max(1, Math.floor(speed * 4)); i++) {
+                    intensityValue = 0.25 * prng.next() + 0.75 * intensityValue;
                 }
 
-                // Get intensity from LFSR output (map 0-255 to 0-1)
-                const intensity = (lfsr.flicker / 255.0) * 0.4 + LFSR_PARAMS.MIN_BRIGHTNESS;
+                // Map to intensity range [0.6, 1.0]
+                const intensity = intensityValue * 0.4 + LFSR_PARAMS.MIN_BRIGHTNESS;
 
                 // Get RGB using candle color modulation
                 const rgb = modulateCandleColor(intensity);
@@ -759,13 +975,13 @@
              * Damped harmonic oscillator simulating physical candle flicker
              * Models buoyancy-driven Kelvin-Helmholtz instability
              * @param {number} timerFrame - Current frame number
-             * @param {LCG} prng - PRNG instance (used for oscillator seed)
+             * @param {PRNG} prng - PRNG instance (used for oscillator seed)
              * @param {number} speed - Speed multiplier
              * @returns {Object} Pattern result with r, g, b, intensity
              */
             execute: function(timerFrame, prng, speed) {
-                // Use frame as seed for oscillator
-                const oscillator = new DampedHarmonicOscillator(timerFrame);
+                // Create oscillator with the current PRNG
+                const oscillator = new DampedHarmonicOscillator(prng);
 
                 // Run oscillator for a few cycles based on speed
                 let intensity = CANDLE_PARAMS.BASE_INTENSITY;
@@ -791,13 +1007,13 @@
              * Constrained random walk with occasional larger flickers
              * Simple but produces natural slow variations, centered at 75%
              * @param {number} timerFrame - Current frame number
-             * @param {LCG} prng - PRNG instance (used for random walk seed)
+             * @param {PRNG} prng - PRNG instance (used for random walk seed)
              * @param {number} speed - Speed multiplier
              * @returns {Object} Pattern result with r, g, b, intensity
              */
             execute: function(timerFrame, prng, speed) {
-                // Use frame as seed for random walk
-                const walker = new ConstrainedRandomWalk(timerFrame);
+                // Create random walk with the current PRNG
+                const walker = new ConstrainedRandomWalk(prng);
 
                 // Run random walk for a few cycles based on speed
                 let intensity = CANDLE_PARAMS.CENTER_INTENSITY;
@@ -829,6 +1045,7 @@
         try {
             // Elements
             const patternSelect = document.getElementById('pattern');
+            const prngSelect = document.getElementById('prng');
             const speedSelect = document.getElementById('speed');
             const resetBtn = document.getElementById('reset');
             const colorDisplay = document.getElementById('colorDisplay');
@@ -836,6 +1053,7 @@
 
             // Info elements
             const infoPattern = document.getElementById('infoPattern');
+            const infoPrngType = document.getElementById('infoPrngType');
             const infoTimer = document.getElementById('infoTimer');
             const infoPrng = document.getElementById('infoPrng');
             const infoRgb = document.getElementById('infoRgb');
@@ -844,8 +1062,8 @@
 
             // Validate DOM elements exist
             const requiredElements = [
-                patternSelect, speedSelect, resetBtn, colorDisplay, intensityDisplay,
-                infoPattern, infoTimer, infoPrng, infoRgb, infoIntensity, infoHsv
+                patternSelect, prngSelect, speedSelect, resetBtn, colorDisplay, intensityDisplay,
+                infoPattern, infoPrngType, infoTimer, infoPrng, infoRgb, infoIntensity, infoHsv
             ];
 
             for (const el of requiredElements) {
@@ -855,14 +1073,17 @@
             }
 
             // Initialize PRNG and Timer
-            const prng = new LCG();
+            let currentPrngType = prngSelect.value;
+            let prng = createPRNG(currentPrngType);
             const timer = new Timer(60);
 
             // Cache PerlinNoise instances for patterns that need them
             const perlinInstances = {};
+            
+            // Create PerlinNoise instances (not the PRNG wrapper) for patterns that use Perlin directly
             for (const patternName in patterns) {
                 if (patterns[patternName].usesPerlin) {
-                    perlinInstances[patternName] = new PerlinNoise(prng.state);
+                    perlinInstances[patternName] = new PerlinNoise();
                 }
             }
 
@@ -881,6 +1102,9 @@
                 speed = 1;
                 speedSelect.value = '1';
             }
+
+            // Store previous PRNG state for random seed generation
+            let previousPrngState = null;
 
             /**
              * Update UI with current state
@@ -902,6 +1126,7 @@
                     infoTimer.textContent = frame.toString().padStart(6, ' ');
                     infoPrng.textContent = prngState.padStart(20, '0');
                     infoPattern.textContent = patterns[currentPattern].name;
+                    infoPrngType.textContent = prng.getName();
                     infoRgb.textContent = `(${result.r.toString().padStart(3, ' ')}, ${result.g.toString().padStart(3, ' ')}, ${result.b.toString().padStart(3, ' ')})`;
                     infoIntensity.textContent = `${Math.round(intensityPercent).toString().padStart(3, ' ')}%`;
 
@@ -951,7 +1176,7 @@
                     prng.reset();
                     // Update the PerlinNoise instance for the new pattern if it uses Perlin
                     if (patterns[currentPattern].usesPerlin) {
-                        perlinInstances[currentPattern] = new PerlinNoise(prng.state);
+                        perlinInstances[currentPattern] = new PerlinNoise();
                     }
                 } else {
                     console.warn(`Unknown pattern: ${patternName}, falling back to rgbSweep`);
@@ -961,9 +1186,46 @@
                 }
             }
 
+            /**
+             * Handle PRNG change
+             * @param {string} prngType - New PRNG type
+             */
+            function changePRNG(prngType) {
+                if (PRNG_TYPES[prngType]) {
+                    // Store current state for potential use in seeding
+                    previousPrngState = prng.getState();
+                    
+                    // Create new PRNG with a random seed based on previous state if available
+                    // This ensures different sequences when switching
+                    let newSeed;
+                    if (previousPrngState) {
+                        // Use a hash of the previous state as seed for deterministic but different sequences
+                        let hash = 0;
+                        for (let i = 0; i < previousPrngState.length; i++) {
+                            const char = previousPrngState.charCodeAt(i);
+                            hash = ((hash << 5) - hash) + char;
+                            hash = hash & hash; // Convert to 32-bit integer
+                        }
+                        newSeed = hash !== 0 ? BigInt(hash) : undefined;
+                    }
+                    
+                    currentPrngType = prngType;
+                    prng = createPRNG(prngType, newSeed);
+                } else {
+                    console.warn(`Unknown PRNG type: ${prngType}, falling back to LCG`);
+                    currentPrngType = 'lcg';
+                    prng = createPRNG('lcg');
+                    prngSelect.value = 'lcg';
+                }
+            }
+
             // Event listeners
             patternSelect.addEventListener('change', (e) => {
                 changePattern(e.target.value);
+            });
+
+            prngSelect.addEventListener('change', (e) => {
+                changePRNG(e.target.value);
             });
 
             speedSelect.addEventListener('change', (e) => {
@@ -978,9 +1240,9 @@
 
             resetBtn.addEventListener('click', () => {
                 prng.reset();
-                // Update PerlinNoise instances with new seed
+                // Also reset PerlinNoise instances with new seed from PRNG
                 for (const key in perlinInstances) {
-                    perlinInstances[key] = new PerlinNoise(prng.state);
+                    perlinInstances[key] = new PerlinNoise();
                 }
             });
 

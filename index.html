@@ -22,6 +22,13 @@
             </select>
         </div>
         <div class="control-group">
+            <label for="prng">PRNG:</label>
+            <select id="prng" aria-label="PRNG Implementation">
+                <option value="lcg">LCG</option>
+                <option value="lfsr">LFSR</option>
+            </select>
+        </div>
+        <div class="control-group">
             <label for="speed">Speed:</label>
             <select id="speed" aria-label="Speed">
                 <option value="1">1x</option>
@@ -56,6 +63,10 @@
         <div class="info-row">
             <span class="info-label">Pattern:</span>
             <span class="info-value" id="infoPattern">RGB Color Sweep</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">PRNG:</span>
+            <span class="info-value" id="infoPrngType">LCG</span>
         </div>
         <div class="info-row">
             <span class="info-label">Timer (60Hz):</span>
