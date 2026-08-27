@@ -268,61 +268,7 @@
     }
 
     // ============================================
-    // LFSR with Shaping class for candle flicker (legacy, kept for backward compatibility)
-    // ============================================
-
-    /**
-     * Linear Feedback Shift Register with shaping filter
-     * Extremely low computational cost
-     * This is the original LFSR implementation with flicker filtering
-     */
-    class LFSRWithShaping {
-        /**
-         * @param {number} [seed=0x81] - Initial seed value
-         */
-        constructor(seed = LFSR_PARAMS.DEFAULT_SEED) {
-            this.state = seed || LFSR_PARAMS.DEFAULT_SEED;
-            this.flicker = 180; // Current flicker value (0-255)
-            this.filterAlpha = LFSR_PARAMS.FILTER_ALPHA;
-        }
-
-        /**
-         * Generate next LFSR bit
-         * Feedback polynomial: x^8 + x^4 + x^3 + x^2 + 1
-         * @returns {number} Next bit (0 or 1)
-         */
-        nextBit() {
-            const feedback = ((this.state >> 0) ^ (this.state >> 2) ^ 
-                            (this.state >> 3) ^ (this.state >> 4)) & 1;
-            this.state = ((this.state >> 1) | (feedback << 7)) & 0xFF;
-            return feedback;
-        }
-
-        /**
-         * Generate next flicker value
-         * @returns {number} Flicker value (0-255)
-         */
-        next() {
-            this.nextBit();
-            const raw = this.state;
-            // Apply low-pass filter
-            this.flicker = Math.round(this.filterAlpha * raw + 
-                                     (1 - this.filterAlpha) * this.flicker);
-            return this.flicker;
-        }
-
-        /**
-         * Reset LFSR state
-         * @param {number} [seed=0x81] - New seed value
-         */
-        reset(seed = LFSR_PARAMS.DEFAULT_SEED) {
-            this.state = seed || LFSR_PARAMS.DEFAULT_SEED;
-            this.flicker = 180;
-        }
-    }
-
-    // ============================================
-    // Perlin Noise PRNG Wrapper
+    // Perlin Noise implementation
     // ============================================
 
     /**
@@ -338,7 +284,7 @@
         }
 
         /**
-         * Build permutation table using a PRNG
+         * Build permutation table using a simple LCG
          * @param {bigint|number} seed - Seed value
          * @returns {number[]} Permutation table
          */
@@ -534,15 +480,23 @@
      */
     class DampedHarmonicOscillator {
         /**
-         * @param {PRNG} [prng] - PRNG instance for random disturbances
+         * @param {number} [seed=42] - Seed for internal PRNG
          */
-        constructor(prng) {
+        constructor(seed = 42) {
             this.position = 0.0;
             this.velocity = 0.0;
             this.frequency = OSCILLATOR_PARAMS.FREQUENCY;
             this.damping = OSCILLATOR_PARAMS.DAMPING;
-            this.prng = prng || new LCG();
+            this.seed = seed;
             this.deltaTime = OSCILLATOR_PARAMS.DELTA_TIME;
+        }
+
+        /**
+         * Set the PRNG to use
+         * @param {PRNG} prng - PRNG instance
+         */
+        setPRNG(prng) {
+            this.prng = prng;
         }
 
         /**
@@ -550,6 +504,10 @@
          * @returns {number} Intensity value in [0.6, 1.0]
          */
         next() {
+            if (!this.prng) {
+                this.prng = new LCG(this.seed);
+            }
+
             // Add random disturbance occasionally (simulates air currents)
             if (this.prng.next() < OSCILLATOR_PARAMS.DISTURBANCE_CHANCE) {
                 this.velocity += (this.prng.next() * 2 - 1) * OSCILLATOR_PARAMS.KICK_MAGNITUDE;
@@ -574,12 +532,13 @@
 
         /**
          * Reset oscillator state
-         * @param {PRNG} [prng] - New PRNG instance
+         * @param {number} [seed=42] - New seed value
          */
-        reset(prng) {
+        reset(seed = 42) {
             this.position = 0.0;
             this.velocity = 0.0;
-            this.prng = prng || new LCG();
+            this.seed = seed;
+            delete this.prng;
         }
     }
 
@@ -593,13 +552,21 @@
      */
     class ConstrainedRandomWalk {
         /**
-         * @param {PRNG} [prng] - PRNG instance for random steps
+         * @param {number} [seed=42] - Seed for internal PRNG
          */
-        constructor(prng) {
+        constructor(seed = 42) {
             this.brightness = RANDOM_WALK_PARAMS.START_BRIGHTNESS;
             this.minBrightness = RANDOM_WALK_PARAMS.MIN_BRIGHTNESS;
             this.maxBrightness = RANDOM_WALK_PARAMS.MAX_BRIGHTNESS;
-            this.prng = prng || new LCG();
+            this.seed = seed;
+        }
+
+        /**
+         * Set the PRNG to use
+         * @param {PRNG} prng - PRNG instance
+         */
+        setPRNG(prng) {
+            this.prng = prng;
         }
 
         /**
@@ -607,6 +574,10 @@
          * @returns {number} Intensity value in [0.59, 0.94]
          */
         next() {
+            if (!this.prng) {
+                this.prng = new LCG(this.seed);
+            }
+
             // Random step: small changes most of the time
             const step = this.prng.nextInt(RANDOM_WALK_PARAMS.SMALL_STEP_RANGE) - 
                         (RANDOM_WALK_PARAMS.SMALL_STEP_RANGE - 1) / 2;
@@ -631,11 +602,12 @@
 
         /**
          * Reset random walk state
-         * @param {PRNG} [prng] - New PRNG instance
+         * @param {number} [seed=42] - New seed value
          */
-        reset(prng) {
+        reset(seed = 42) {
             this.brightness = RANDOM_WALK_PARAMS.START_BRIGHTNESS;
-            this.prng = prng || new LCG();
+            this.seed = seed;
+            delete this.prng;
         }
     }
 
@@ -833,6 +805,13 @@
     // Blink Patterns
     // ============================================
 
+    // Shared state for patterns that need persistent PRNG-based objects
+    const patternState = {
+        oscillator: null,
+        randomWalk: null,
+        lfsrFlicker: 180
+    };
+
     /**
      * Pattern definitions
      * Each pattern has: name, usesPerlin (or usesPRNG), execute function
@@ -844,12 +823,12 @@
             /**
              * Goes around color circle with constant intensity
              * @param {number} timerFrame - Current frame number
-             * @param {PRNG} prng - PRNG instance
+             * @param {PRNG} prng - PRNG instance (state is advanced)
              * @param {number} speed - Speed multiplier
              * @returns {Object} Pattern result with r, g, b, intensity
              */
             execute: function(timerFrame, prng, speed) {
-                // Advance PRNG to keep state moving
+                // Advance PRNG state
                 prng.next();
 
                 // Hue cycles from 0 to 360 degrees over time
@@ -874,21 +853,20 @@
             /**
              * Perlin noise based candle with 1800K-2000K color temperature
              * @param {number} timerFrame - Current frame number
-             * @param {PerlinNoisePRNG|PerlinNoise} perlin - Perlin noise instance
+             * @param {PerlinNoise} perlin - Perlin noise instance
              * @param {number} speed - Speed multiplier
              * @returns {Object} Pattern result with r, g, b, intensity
              */
             execute: function(timerFrame, perlin, speed) {
-                const perlinNoise = perlin.perlin || perlin;
                 const time = timerFrame * speed * TIMER_PARAMS.TIME_SCALE;
 
                 // fBm for smooth, natural-looking flicker
-                const flickerNoise = perlinNoise.fBm(time, 0, 4, 0.5, 2.0);
+                const flickerNoise = perlin.fBm(time, 0, 4, 0.5, 2.0);
 
                 // Map noise range [-1,1] to intensity range [0.6, 1.0]
                 const intensity = CANDLE_PARAMS.BASE_INTENSITY + flickerNoise * CANDLE_PARAMS.FLICKER_RANGE;
 
-                // Get RGB based on intensity using grantwinney.com algorithm
+                // Get RGB based on intensity
                 const rgb = modulateCandleColor(intensity);
 
                 return {
@@ -905,19 +883,18 @@
             /**
              * Advanced perlin noise candle with 1800K-2000K color temperature
              * @param {number} timerFrame - Current frame number
-             * @param {PerlinNoisePRNG|PerlinNoise} perlin - Perlin noise instance
+             * @param {PerlinNoise} perlin - Perlin noise instance
              * @param {number} speed - Speed multiplier
              * @returns {Object} Pattern result with r, g, b, intensity
              */
             execute: function(timerFrame, perlin, speed) {
-                const perlinNoise = perlin.perlin || perlin;
                 const time = timerFrame * speed * TIMER_PARAMS.TIME_SCALE;
 
                 // Primary flicker - fast, small variations
-                const flicker1 = perlinNoise.fBm(time * 2, 0, 3, 0.6, 2.0);
+                const flicker1 = perlin.fBm(time * 2, 0, 3, 0.6, 2.0);
 
                 // Secondary flicker - slower, larger variations
-                const flicker2 = perlinNoise.fBm(time * 0.5, 50, 4, 0.4, 2.0);
+                const flicker2 = perlin.fBm(time * 0.5, 50, 4, 0.4, 2.0);
 
                 // Combine flickers for more natural effect
                 let intensity = 0.7 + (flicker1 * 0.15 + flicker2 * 0.1) + 0.15;
@@ -940,7 +917,7 @@
             /**
              * Uses the selected PRNG with shaping filter
              * @param {number} timerFrame - Current frame number
-             * @param {PRNG} prng - PRNG instance
+             * @param {PRNG} prng - PRNG instance (state is advanced)
              * @param {number} speed - Speed multiplier
              * @returns {Object} Pattern result with r, g, b, intensity
              */
@@ -949,13 +926,20 @@
                 let intensityValue = prng.next();
                 
                 // Apply low-pass filter for smoother flicker
-                // We'll simulate the filter effect by averaging multiple samples
+                // Simulate filter by averaging with previous value
+                const filterAlpha = LFSR_PARAMS.FILTER_ALPHA;
+                patternState.lfsrFlicker = Math.round(filterAlpha * (intensityValue * 255) + 
+                                                     (1 - filterAlpha) * patternState.lfsrFlicker);
+                
+                // Run for additional cycles based on speed
                 for (let i = 1; i < Math.max(1, Math.floor(speed * 4)); i++) {
-                    intensityValue = 0.25 * prng.next() + 0.75 * intensityValue;
+                    intensityValue = prng.next();
+                    patternState.lfsrFlicker = Math.round(filterAlpha * (intensityValue * 255) + 
+                                                         (1 - filterAlpha) * patternState.lfsrFlicker);
                 }
 
                 // Map to intensity range [0.6, 1.0]
-                const intensity = intensityValue * 0.4 + LFSR_PARAMS.MIN_BRIGHTNESS;
+                const intensity = (patternState.lfsrFlicker / 255.0) * 0.4 + LFSR_PARAMS.MIN_BRIGHTNESS;
 
                 // Get RGB using candle color modulation
                 const rgb = modulateCandleColor(intensity);
@@ -975,18 +959,21 @@
              * Damped harmonic oscillator simulating physical candle flicker
              * Models buoyancy-driven Kelvin-Helmholtz instability
              * @param {number} timerFrame - Current frame number
-             * @param {PRNG} prng - PRNG instance (used for oscillator seed)
+             * @param {PRNG} prng - PRNG instance (state is advanced)
              * @param {number} speed - Speed multiplier
              * @returns {Object} Pattern result with r, g, b, intensity
              */
             execute: function(timerFrame, prng, speed) {
-                // Create oscillator with the current PRNG
-                const oscillator = new DampedHarmonicOscillator(prng);
+                // Initialize oscillator with PRNG on first run
+                if (!patternState.oscillator) {
+                    patternState.oscillator = new DampedHarmonicOscillator();
+                }
+                patternState.oscillator.setPRNG(prng);
 
-                // Run oscillator for a few cycles based on speed
+                // Run oscillator for cycles based on speed
                 let intensity = CANDLE_PARAMS.BASE_INTENSITY;
                 for (let i = 0; i < Math.max(1, Math.floor(speed * 2)); i++) {
-                    intensity = oscillator.next();
+                    intensity = patternState.oscillator.next();
                 }
 
                 // Get RGB using candle color modulation
@@ -1007,18 +994,21 @@
              * Constrained random walk with occasional larger flickers
              * Simple but produces natural slow variations, centered at 75%
              * @param {number} timerFrame - Current frame number
-             * @param {PRNG} prng - PRNG instance (used for random walk seed)
+             * @param {PRNG} prng - PRNG instance (state is advanced)
              * @param {number} speed - Speed multiplier
              * @returns {Object} Pattern result with r, g, b, intensity
              */
             execute: function(timerFrame, prng, speed) {
-                // Create random walk with the current PRNG
-                const walker = new ConstrainedRandomWalk(prng);
+                // Initialize random walk with PRNG on first run
+                if (!patternState.randomWalk) {
+                    patternState.randomWalk = new ConstrainedRandomWalk();
+                }
+                patternState.randomWalk.setPRNG(prng);
 
-                // Run random walk for a few cycles based on speed
+                // Run random walk for cycles based on speed
                 let intensity = CANDLE_PARAMS.CENTER_INTENSITY;
                 for (let i = 0; i < Math.max(1, Math.floor(speed * 3)); i++) {
-                    intensity = walker.next();
+                    intensity = patternState.randomWalk.next();
                 }
 
                 // Get RGB using candle color modulation
@@ -1079,8 +1069,6 @@
 
             // Cache PerlinNoise instances for patterns that need them
             const perlinInstances = {};
-            
-            // Create PerlinNoise instances (not the PRNG wrapper) for patterns that use Perlin directly
             for (const patternName in patterns) {
                 if (patterns[patternName].usesPerlin) {
                     perlinInstances[patternName] = new PerlinNoise();
@@ -1110,9 +1098,8 @@
              * Update UI with current state
              * @param {Object} result - Pattern result with r, g, b, intensity
              * @param {number} frame - Current frame number
-             * @param {string} prngState - PRNG state string
              */
-            function updateUI(result, frame, prngState) {
+            function updateUI(result, frame) {
                 try {
                     // Update color display
                     colorDisplay.style.backgroundColor = `rgb(${result.r}, ${result.g}, ${result.b})`;
@@ -1124,7 +1111,7 @@
 
                     // Update info with fixed-width formatting
                     infoTimer.textContent = frame.toString().padStart(6, ' ');
-                    infoPrng.textContent = prngState.padStart(20, '0');
+                    infoPrng.textContent = prng.getState().padStart(20, '0');
                     infoPattern.textContent = patterns[currentPattern].name;
                     infoPrngType.textContent = prng.getName();
                     infoRgb.textContent = `(${result.r.toString().padStart(3, ' ')}, ${result.g.toString().padStart(3, ' ')}, ${result.b.toString().padStart(3, ' ')})`;
@@ -1138,7 +1125,7 @@
             }
 
             /**
-             * Timer callback
+             * Timer callback - called at 60Hz
              * @param {number} frame - Current frame number
              */
             function onTimer(frame) {
@@ -1155,11 +1142,11 @@
                         // Use cached PerlinNoise instance
                         result = patterns[currentPattern].execute(frame, perlinInstances[currentPattern], speed);
                     } else {
-                        // Pass PRNG for non-Perlin patterns
+                        // Pass PRNG for non-Perlin patterns - state will be advanced by pattern
                         result = patterns[currentPattern].execute(frame, prng, speed);
                     }
 
-                    updateUI(result, frame, prng.getState());
+                    updateUI(result, frame);
                 } catch (error) {
                     console.error('Error in timer callback:', error);
                 }
@@ -1174,6 +1161,10 @@
                     currentPattern = patternName;
                     // Reset PRNG state when pattern changes to ensure consistent behavior
                     prng.reset();
+                    // Reset pattern state
+                    patternState.oscillator = null;
+                    patternState.randomWalk = null;
+                    patternState.lfsrFlicker = 180;
                     // Update the PerlinNoise instance for the new pattern if it uses Perlin
                     if (patterns[currentPattern].usesPerlin) {
                         perlinInstances[currentPattern] = new PerlinNoise();
@@ -1183,6 +1174,9 @@
                     currentPattern = 'rgbSweep';
                     patternSelect.value = 'rgbSweep';
                     prng.reset();
+                    patternState.oscillator = null;
+                    patternState.randomWalk = null;
+                    patternState.lfsrFlicker = 180;
                 }
             }
 
@@ -1211,11 +1205,19 @@
                     
                     currentPrngType = prngType;
                     prng = createPRNG(prngType, newSeed);
+                    
+                    // Reset pattern state since PRNG changed
+                    patternState.oscillator = null;
+                    patternState.randomWalk = null;
+                    patternState.lfsrFlicker = 180;
                 } else {
                     console.warn(`Unknown PRNG type: ${prngType}, falling back to LCG`);
                     currentPrngType = 'lcg';
                     prng = createPRNG('lcg');
                     prngSelect.value = 'lcg';
+                    patternState.oscillator = null;
+                    patternState.randomWalk = null;
+                    patternState.lfsrFlicker = 180;
                 }
             }
 
@@ -1240,7 +1242,11 @@
 
             resetBtn.addEventListener('click', () => {
                 prng.reset();
-                // Also reset PerlinNoise instances with new seed from PRNG
+                // Reset pattern state
+                patternState.oscillator = null;
+                patternState.randomWalk = null;
+                patternState.lfsrFlicker = 180;
+                // Also reset PerlinNoise instances
                 for (const key in perlinInstances) {
                     perlinInstances[key] = new PerlinNoise();
                 }
