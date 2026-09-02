@@ -268,51 +268,118 @@
     }
 
     // ============================================
-    // Perlin Noise implementation
+    // Perlin Noise implementation (1D)
     // ============================================
 
     /**
+     * Compute LCM of an array of numbers
+     * @param {number[]} numbers - Array of positive integers
+     * @returns {number} LCM of all numbers
+     */
+    function computeLCM(numbers) {
+        if (numbers.length === 0) return 1;
+        
+        /**
+         * Compute GCD using Euclidean algorithm
+         */
+        const gcd = (a, b) => {
+            while (b !== 0) {
+                const temp = b;
+                b = a % b;
+                a = temp;
+            }
+            return a;
+        };
+        
+        const lcm = (a, b) => (a * b) / gcd(a, b);
+        
+        let result = numbers[0];
+        for (let i = 1; i < numbers.length; i++) {
+            result = lcm(result, numbers[i]);
+        }
+        return result;
+    }
+
+    /**
      * Perlin Noise generator for natural-looking patterns
+     * 1D implementation with chunking support
      */
     class PerlinNoise {
         /**
-         * @param {bigint|number} [seed=0] - Seed for permutation table
+         * @param {bigint|number} [seed=0] - Seed for random number generator
+         * @param {number} [sampleFrequency=60] - Base sample frequency in Hz
          */
-        constructor(seed = 0) {
+        constructor(seed = 0, sampleFrequency = 60) {
             this.seed = seed;
-            this.p = this.buildPermutationTable(seed);
+            this.sampleFrequency = sampleFrequency;
+            this.frequencies = [1]; // Start with base frequency
+            this.array = null;
+            this.base = 0;
+            this.arraySize = 0;
+            this.prng = null;
+            this._initialize();
         }
 
         /**
-         * Build permutation table using a simple LCG
-         * @param {bigint|number} seed - Seed value
-         * @returns {number[]} Permutation table
+         * Initialize or reinitialize the noise generator
          */
-        buildPermutationTable(seed) {
-            const p = [];
-            // Use a simple LCG for building the permutation table
-            let state = BigInt(seed || 0);
-            const a = 1664525n;
-            const c = 1013904223n;
-            const m = 2n ** 32n;
-
-            for (let i = 0; i < 256; i++) {
-                p[i] = i;
-            }
-
-            // Fisher-Yates shuffle
-            for (let i = 255; i > 0; i--) {
-                state = (a * state + c) % m;
-                const j = Number(state) % (i + 1);
-                [p[i], p[j]] = [p[j], p[i]];
-            }
-
-            return [...p, ...p];
+        _initialize() {
+            this.prng = new LCG(this.seed);
+            this._recreateArray();
         }
 
         /**
-         * Fade function for smooth interpolation
-         * @param {number} t - Input value
+         * Compute the LCM of all registered frequencies
+         * @returns {number} LCM of frequencies
+         */
+        _computeFrequencyLCM() {
+            return computeLCM(this.frequencies);
+        }
+
+        /**
+         * Recreate the noise array based on current frequencies and base
+         */
+        _recreateArray() {
+            const lcm = this._computeFrequencyLCM();
+            this.arraySize = lcm * this.sampleFrequency;
+            
+            // Create array covering [base, base + arraySize)
+            this.array = new Float64Array(this.arraySize);
+            
+            // Fill the array with combined noise from all frequencies
+            for (let i = 0; i < this.arraySize; i++) {
+                const x = this.base + i;
+                let value = 0;
+                
+                // Sum contributions from all frequencies
+                for (const freq of this.frequencies) {
+                    // Scale coordinate by frequency
+                    const scaledX = x * freq;
+                    // Get the 1D vector value at this grid point
+                    const gridValue = this._getVectorValue(scaledX);
+                    value += gridValue;
+                }
+                
+                this.array[i] = value;
+            }
+        }
+
+        /**
+         * Get the 1D vector value at a grid coordinate
+         * Vectors are in [-255, 255] and point left (negative) or right (positive)
+         * @param {number} x - Grid coordinate
+         * @returns {number} Vector value in [-255, 255]
+         */
+        _getVectorValue(x) {
+            // Use PRNG to generate a random value in [-255, 255]
+            const randomValue = this.prng.next();
+            // Map [0, 1) to [-255, 255]
+            return Math.floor(randomValue * 511) - 255;
+        }
+
+        /**
+         * Fade function for smooth interpolation (5th degree polynomial)
+         * @param {number} t - Input value in [0, 1]
          * @returns {number} Faded value
          */
         fade(t) {
@@ -321,7 +388,7 @@
 
         /**
          * Linear interpolation
-         * @param {number} t - Interpolation factor
+         * @param {number} t - Interpolation factor in [0, 1]
          * @param {number} a - Start value
          * @param {number} b - End value
          * @returns {number} Interpolated value
@@ -331,26 +398,141 @@
         }
 
         /**
-         * Gradient function
-         * @param {number} hash - Hash value
+         * 1D Perlin noise
          * @param {number} x - X coordinate
-         * @param {number} y - Y coordinate
-         * @returns {number} Gradient value
+         * @returns {number} Noise value
          */
-        grad(hash, x, y) {
-            const h = hash & 15;
-            const u = h < 8 ? x : y;
-            const v = h < 4 ? y : (h === 12 || h === 14 ? x : 0);
-            return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+        noise1(x) {
+            // Check if we need to recreate the array
+            const lcm = this._computeFrequencyLCM();
+            const requiredSize = lcm * this.sampleFrequency;
+            
+            // Calculate which chunk x belongs to
+            const chunkStart = Math.floor(x / requiredSize) * requiredSize;
+            
+            if (chunkStart !== this.base) {
+                // Need to recreate array for this chunk
+                this.base = chunkStart;
+                this._recreateArray();
+            }
+
+            // Calculate position within the current array
+            const localX = x - this.base;
+            
+            // Clamp to array bounds (shouldn't happen with proper chunking)
+            if (localX < 0 || localX >= this.arraySize) {
+                // Fallback: recreate with proper base
+                this.base = Math.floor(x / requiredSize) * requiredSize;
+                this._recreateArray();
+                return 0; // Should be handled by recreation above
+            }
+
+            // Get integer coordinates
+            const xi = Math.floor(localX);
+            const x0 = xi;
+            const x1 = xi + 1;
+
+            // Handle edge case at the end of the array
+            if (x1 >= this.arraySize) {
+                // Wrap or return edge value
+                return this.array[x0];
+            }
+
+            // Compute fractional part
+            const sx = localX - xi;
+            const u = this.fade(sx);
+
+            // Get values from array
+            const v0 = this.array[x0];
+            const v1 = this.array[x1];
+
+            // Linear interpolation with fade
+            return this.lerp(u, v0, v1);
         }
 
         /**
-         * 2D Perlin noise
+         * Add a noise frequency
+         * @param {number} frequency - Frequency to add (must be positive integer)
+         */
+        addFrequency(frequency) {
+            if (frequency <= 0 || !Number.isInteger(frequency)) {
+                console.warn(`Invalid frequency: ${frequency}. Must be positive integer.`);
+                return;
+            }
+            
+            if (!this.frequencies.includes(frequency)) {
+                this.frequencies.push(frequency);
+                // Recreate array with new frequencies
+                this._recreateArray();
+            }
+        }
+
+        /**
+         * Get the sample frequency
+         * @returns {number} Current sample frequency in Hz
+         */
+        getSampleFrequency() {
+            return this.sampleFrequency;
+        }
+
+        /**
+         * Set the sample frequency
+         * @param {number} frequency - New sample frequency in Hz
+         */
+        setSampleFrequency(frequency) {
+            if (frequency <= 0) {
+                console.warn(`Invalid sample frequency: ${frequency}. Must be positive.`);
+                return;
+            }
+            this.sampleFrequency = frequency;
+            this._recreateArray();
+        }
+
+        /**
+         * Get current frequencies
+         * @returns {number[]} Array of registered frequencies
+         */
+        getFrequencies() {
+            return [...this.frequencies];
+        }
+
+        /**
+         * Reset with new seed
+         * @param {bigint|number} [seed=0] - New seed value
+         */
+        reset(seed = 0) {
+            this.seed = seed;
+            this._initialize();
+        }
+
+        /**
+         * Get current seed as string
+         * @returns {string} Current seed value
+         */
+        getState() {
+            return BigInt(this.seed).toString();
+        }
+
+        /**
+         * Get the current array bounds
+         * @returns {Object} Object with base and size properties
+         */
+        getArrayBounds() {
+            return {
+                base: this.base,
+                size: this.arraySize
+            };
+        }
+
+        /**
+         * 2D Perlin noise (legacy - kept for backward compatibility)
          * @param {number} x - X coordinate
          * @param {number} y - Y coordinate
          * @returns {number} Noise value in [-1, 1]
          */
         noise2(x, y) {
+            // Fallback implementation for backward compatibility
+            // Uses simple hash-based noise
             const X = Math.floor(x) & 255;
             const Y = Math.floor(y) & 255;
 
@@ -360,22 +542,24 @@
             const u = this.fade(x);
             const v = this.fade(y);
 
-            const A = this.p[X] + Y;
-            const AA = this.p[A];
-            const AB = this.p[A + 1];
-            const B = this.p[X + 1] + Y;
-            const BA = this.p[B];
-            const BB = this.p[B + 1];
+            // Simple hash function for 2D
+            const hash = (x, y) => {
+                let h = (x * 378559 + y * 994911) % 256;
+                return h;
+            };
+
+            const A = hash(X, Y);
+            const B = hash(X + 1, Y);
 
             return this.lerp(
                 v,
-                this.lerp(u, this.grad(this.p[AA], x, y), this.grad(this.p[BA], x - 1, y)),
-                this.lerp(u, this.grad(this.p[AB], x, y - 1), this.grad(this.p[BB], x - 1, y - 1))
+                this.lerp(u, A / 255 * 2 - 1, B / 255 * 2 - 1),
+                this.lerp(u, (hash(X, Y + 1) / 255 * 2 - 1), (hash(X + 1, Y + 1) / 255 * 2 - 1))
             );
         }
 
         /**
-         * Fractional Brownian Motion
+         * Fractional Brownian Motion (legacy - kept for backward compatibility)
          * @param {number} x - X coordinate
          * @param {number} y - Y coordinate
          * @param {number} [octaves=4] - Number of octaves
@@ -398,23 +582,6 @@
 
             return total / maxValue;
         }
-
-        /**
-         * Reset with new seed
-         * @param {bigint|number} [seed=0] - New seed value
-         */
-        reset(seed = 0) {
-            this.seed = seed;
-            this.p = this.buildPermutationTable(seed);
-        }
-
-        /**
-         * Get current seed as string
-         * @returns {string} Current seed value
-         */
-        getState() {
-            return BigInt(this.seed).toString();
-        }
     }
 
     /**
@@ -434,14 +601,18 @@
 
         /**
          * Generate next random number in [0, 1)
-         * Uses Perlin noise fBm at increasing x coordinates
+         * Uses 1D Perlin noise at increasing x coordinates
          * @returns {number} Random value between 0 (inclusive) and 1 (exclusive)
          */
         next() {
-            // Use fBm to get a noise value and map from [-1,1] to [0,1)
-            const noise = this.perlin.fBm(this.counter, 0, 4, 0.5, 2.0);
+            // Use 1D noise to get a value and map from range to [0,1)
+            const noise = this.perlin.noise1(this.counter);
             this.counter++;
-            return (noise + 1) / 2;
+            // Normalize from the expected range to [0,1)
+            // The noise values can be in a wide range due to multiple frequencies
+            // We'll use a simple normalization based on max possible value
+            const maxPossible = this.perlin.frequencies.length * 255;
+            return (noise / maxPossible + 0.5);
         }
 
         /**
@@ -860,11 +1031,15 @@
             execute: function(timerFrame, perlin, speed) {
                 const time = timerFrame * speed * TIMER_PARAMS.TIME_SCALE;
 
-                // fBm for smooth, natural-looking flicker
-                const flickerNoise = perlin.fBm(time, 0, 4, 0.5, 2.0);
+                // Use 1D noise for flicker
+                const flickerNoise = perlin.noise1(time);
+
+                // Normalize noise value to [-1, 1] range
+                const maxPossible = perlin.getFrequencies().length * 255;
+                const normalizedNoise = (flickerNoise / maxPossible) * 2;
 
                 // Map noise range [-1,1] to intensity range [0.6, 1.0]
-                const intensity = CANDLE_PARAMS.BASE_INTENSITY + flickerNoise * CANDLE_PARAMS.FLICKER_RANGE;
+                const intensity = CANDLE_PARAMS.BASE_INTENSITY + normalizedNoise * CANDLE_PARAMS.FLICKER_RANGE;
 
                 // Get RGB based on intensity
                 const rgb = modulateCandleColor(intensity);
@@ -891,13 +1066,17 @@
                 const time = timerFrame * speed * TIMER_PARAMS.TIME_SCALE;
 
                 // Primary flicker - fast, small variations
-                const flicker1 = perlin.fBm(time * 2, 0, 3, 0.6, 2.0);
+                // We'll use different perlin instances for different frequencies
+                const flicker1 = perlin.noise1(time * 2);
+                const flicker2 = perlin.noise1(time * 0.5);
 
-                // Secondary flicker - slower, larger variations
-                const flicker2 = perlin.fBm(time * 0.5, 50, 4, 0.4, 2.0);
+                // Normalize noise values
+                const maxPossible = perlin.getFrequencies().length * 255;
+                const normalizedFlicker1 = (flicker1 / maxPossible) * 2;
+                const normalizedFlicker2 = (flicker2 / maxPossible) * 2;
 
                 // Combine flickers for more natural effect
-                let intensity = 0.7 + (flicker1 * 0.15 + flicker2 * 0.1) + 0.15;
+                let intensity = 0.7 + (normalizedFlicker1 * 0.15 + normalizedFlicker2 * 0.1) + 0.15;
                 intensity = Math.min(intensity, CANDLE_PARAMS.MAX_INTENSITY);
 
                 // Get RGB using candle color modulation
@@ -1071,7 +1250,11 @@
             const perlinInstances = {};
             for (const patternName in patterns) {
                 if (patterns[patternName].usesPerlin) {
-                    perlinInstances[patternName] = new PerlinNoise();
+                    // Create PerlinNoise instance with sample frequency matching timer
+                    perlinInstances[patternName] = new PerlinNoise(0, 60);
+                    // Add some frequencies for richer noise
+                    perlinInstances[patternName].addFrequency(2);
+                    perlinInstances[patternName].addFrequency(3);
                 }
             }
 
